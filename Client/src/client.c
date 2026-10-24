@@ -29,7 +29,7 @@ int resolve_address(const char* IP_adress, struct addrinfo **servinfo ){
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
-    
+
     if ((return_value = getaddrinfo(IP_adress, PORT, &hints, servinfo)) != 0){
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(return_value));
         return -1;
@@ -55,6 +55,21 @@ int try_to_connect(struct addrinfo* serfinfo, int* sockfd){
     if(p == NULL){
         fprintf(stderr, "client: failed to connect \n");
         return -1;
+    }
+    return 0;
+}
+
+int send_cycle(int* sockfd){
+    char message_buf[MAX_BUF_SIZE];
+    while(1){
+        if(fgets(message_buf, sizeof(message_buf),stdin )== NULL){
+            break;
+        } 
+        message_buf[strcspn(message_buf, "\n")] = 0;
+        if(send(*sockfd, message_buf, sizeof(message_buf), 0) == -1){
+            perror("send");
+            return -1;
+        }
     }
     return 0;
 }
@@ -85,6 +100,13 @@ int client_start(int argc, char* argv[]){
     }
 
     freeaddrinfo(servinfo);
+
+    if(send_cycle(&sockfd) != 0){
+        close(sockfd);
+        return 4;
+    }
+
+    close(sockfd);
 
     return 0;
 }
