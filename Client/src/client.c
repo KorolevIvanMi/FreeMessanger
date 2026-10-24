@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include <sys/wait.h>
 
+#include "../include/client.h"
 #include "../../common/include/protocol.h"
 
 
@@ -59,6 +60,7 @@ int try_to_connect(struct addrinfo* serfinfo, int* sockfd){
     return 0;
 }
 
+// простой цикл бесконечной отправки сообщений
 int send_cycle(int* sockfd){
     char message_buf[MAX_BUF_SIZE];
     while(1){
