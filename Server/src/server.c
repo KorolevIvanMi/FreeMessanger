@@ -1,5 +1,5 @@
+#include <asm-generic/socket.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <sys/types.h>
@@ -8,9 +8,10 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <sys/wait.h>
-#include <signal.h>
 
 #include "../../common/include/protocol.h"
+
+#define BACKLOG 10
 
 int resolve_address(struct addrinfo **servinfo ){
     int return_value;
@@ -28,11 +29,46 @@ int resolve_address(struct addrinfo **servinfo ){
     return 0;
 }
 
+int try_to_bind(struct addrinfo* servinfo, int* sockfd){
+    struct addrinfo *p = NULL; 
+    int yes = 1;
+    for(p = servinfo; p != NULL; p = p->ai_next){
+        if ((*sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1){
+            perror("server: socket");
+            continue;
+        }
+        if(setsockopt(*sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1){
+            perror("server: setsockopt");
+            return -1;
+        }
+        if(bind(*sockfd, p->ai_addr, p->ai_addrlen) == -1){
+            close(*sockfd);
+            perror("server: bind");
+            continue;
+        }
+        break;
+    }
+    if(p == NULL){
+        fprintf(stderr, "server: failed to bind \n");
+        return 2;
+    }
+
+    return 0;
+}
+
+void* get_in_addr(struct sockaddr *sa){
+    if (sa->sa_family == AF_INET){
+        return &(((struct sockaddr_in*)sa)->sin_addr);
+    }
+
+    return &(((struct sockaddr_in6*)sa)->sin6_addr);
+}
 
 int server_start(int argc, char* argv[]){
     int sockfd = -1; // файловый дескриптор сокета
     int numbytes = 0; // точное количество байтов, которое пришло или ушло
     char buffer[MAX_BUF_SIZE]; // буффер для складывания полученных значений
+    char s[INET6_ADDRSTRLEN];
 
     struct addrinfo  *servinfo = NULL;// вспомогательные переменные для разрешения адреса
     
@@ -40,6 +76,49 @@ int server_start(int argc, char* argv[]){
     if (resolve_address(&servinfo) != 0){
         return 2;
     }
-    
+
+    if(try_to_bind(servinfo, &sockfd)){
+        freeaddrinfo(servinfo);
+        return 3;
+    }
+    freeaddrinfo(servinfo);
+    if (listen(sockfd, BACKLOG) == -1) {
+        perror("listen");
+        close(sockfd);
+        return 4;
+    }
+    printf("server: waiting for connections...\n");
+
+    struct sockaddr_storage their_addr;
+    socklen_t sin_size;
+    int new_fd;
+    while(1){
+        sin_size = sizeof(their_addr);
+        new_fd = accept(sockfd, (struct sockaddr*)&their_addr, &sin_size);
+        if(new_fd == -1){
+            perror("accept");
+            continue;
+        }
+        inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr*)&their_addr), s, sizeof s);
+        printf("server: got connection from %s\n", s);
+
+        char buf[MAX_BUF_SIZE];
+        ssize_t n;
+        while ((n = recv(new_fd, buf, sizeof buf - 1, 0)) > 0) {
+            buf[n] = '\0';
+            buf[strcspn(buf, "\n")] = '\0';
+            if (buf[0] == '\0') continue; 
+            printf("client: %s\n", buf);
+        }
+
+        if (n == 0){
+            printf("client disconnected\n");
+        } 
+        else {
+            perror("recv");
+        }      
+
+        close(new_fd);
+    }
     return 0;
 }

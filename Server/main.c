@@ -1,4 +1,7 @@
+#include "include/server.h"
 
-int main(){
-    return 0;
+int main(int argc, char* argv[]){
+    int error = 0;
+    error = server_start(argc, argv);
+    return error;
 }
