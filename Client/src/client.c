@@ -43,12 +43,12 @@ int try_to_connect(struct addrinfo* serfinfo, int* sockfd){
     struct addrinfo *p = NULL; 
     for(p = serfinfo; p != NULL; p = p->ai_next){
         if((*sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1){
-            perror("client: socket");
+            // perror("client: socket");
             continue;
         }
         if(connect(*sockfd, p->ai_addr, p->ai_addrlen) == -1){
             close(*sockfd);
-            perror("client: connect");
+            // perror("client: connect");
             continue;
         }
         break;

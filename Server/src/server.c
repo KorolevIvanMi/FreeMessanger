@@ -7,10 +7,21 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <sys/wait.h>
+#include <stdlib.h>
+
+#include <pthread.h>
+
 
 #include "../../common/include/protocol.h"
 
 #define BACKLOG 10
+pthread_mutex_t lock;
+static int next_client_id = 0;
+
+typedef struct{
+    int fd;
+    int client_id;
+} client_args_t;
 
 int resolve_address(struct addrinfo **servinfo ){
     int return_value;
@@ -64,14 +75,19 @@ void* get_in_addr(struct sockaddr *sa){
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
-int get_client_messages_cycle(int new_fd){
+
+
+int get_client_messages_cycle(int new_fd, int client_id){
     char buf[MAX_BUF_SIZE];
         ssize_t n;
         while ((n = recv(new_fd, buf, sizeof buf - 1, 0)) > 0) {
             buf[n] = '\0';
             buf[strcspn(buf, "\n")] = '\0';
             if (buf[0] == '\0') continue; 
-            printf("client: %s\n", buf);
+
+            pthread_mutex_lock(&lock);
+            printf("client%d: %s\n",client_id, buf);
+            pthread_mutex_unlock(&lock);
         }
 
         if (n == 0){
@@ -82,6 +98,17 @@ int get_client_messages_cycle(int new_fd){
             perror("recv");
             return 1;
         }
+}
+
+void* client_thread(void* arg){
+    client_args_t* args = arg;
+    int fd = args->fd;
+    int client_id = args->client_id;
+    free(args);
+
+    get_client_messages_cycle(fd, client_id);
+    close(fd);
+    return NULL;
 }
 
 int find_client_connection_cycle(int* sockfd){
@@ -99,12 +126,21 @@ int find_client_connection_cycle(int* sockfd){
         inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr*)&their_addr), s, sizeof s);
         printf("server: got connection from %s\n", s);
 
-        if (get_client_messages_cycle(new_fd) != 0){
+        client_args_t* args = malloc(sizeof *args);
+        if (!args) { close(new_fd); continue; }
+        args->fd = new_fd;
+        args->client_id = next_client_id++;
+
+        pthread_t tid;
+        int err = pthread_create(&tid, NULL, client_thread, args);
+        if (err != 0) {
+            fprintf(stderr, "pthread_create: %s\n", strerror(err));
+            free(args);
             close(new_fd);
             continue;
         }
 
-        close(new_fd);
+        pthread_detach(tid);
     }
     return 0;
 }
@@ -112,6 +148,7 @@ int find_client_connection_cycle(int* sockfd){
 
 
 int server_start(int argc, char* argv[]){
+    pthread_mutex_init(&lock, NULL);
     int sockfd = -1; // файловый дескриптор сокета
     // int numbytes = 0; // точное количество байтов, которое пришло или ушло
     // char buffer[MAX_BUF_SIZE]; // буффер для складывания полученных значений
@@ -136,5 +173,6 @@ int server_start(int argc, char* argv[]){
     printf("server: waiting for connections...\n");
     find_client_connection_cycle(&sockfd);
     
+    pthread_mutex_destroy(&lock);
     return 0;
 }
