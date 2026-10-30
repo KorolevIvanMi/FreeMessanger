@@ -19,8 +19,8 @@ $(SERVER_TARGET):
 
 all: $(CLIENT_TARGET) $(SERVER_TARGET)
 
-up_server :
+up_server : $(SERVER_TARGET)
 	$(OUTPUT_DIR)$(SERVER_TARGET)
 
-up_client : 
+up_client : $(CLIENT_TARGET)
 	$(OUTPUT_DIR)$(CLIENT_TARGET) $(ARGS)
