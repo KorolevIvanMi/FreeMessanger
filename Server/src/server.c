@@ -17,6 +17,7 @@
 #define BACKLOG 10
 pthread_mutex_t lock;
 static int next_client_id = 0;
+static int clients[10] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
 
 typedef struct{
     int fd;
@@ -75,29 +76,50 @@ void* get_in_addr(struct sockaddr *sa){
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
-
+void send_message_to_clients(int sender_id, const char buf[MAX_BUF_SIZE]){
+    size_t len = strlen(buf);
+    for(int i = 0 ; i < 10; i ++){
+        if (clients[i] != -1){
+            if (i != sender_id){
+                if(send(clients[i], buf, len, 0) == -1){
+                    perror("send_to_clients");
+                    continue;
+                }
+            }
+            
+        }
+    }
+}
 
 int get_client_messages_cycle(int new_fd, int client_id){
     char buf[MAX_BUF_SIZE];
-        ssize_t n;
-        while ((n = recv(new_fd, buf, sizeof buf - 1, 0)) > 0) {
-            buf[n] = '\0';
-            buf[strcspn(buf, "\n")] = '\0';
-            if (buf[0] == '\0') continue; 
-
-            pthread_mutex_lock(&lock);
-            printf("client%d: %s\n",client_id, buf);
-            pthread_mutex_unlock(&lock);
-        }
-
-        if (n == 0){
-            printf("client disconnected\n");
-            return 0;
+    ssize_t n;
+    while ((n = recv(new_fd, buf, sizeof buf - 1, 0)) > 0) {
+        buf[n] = '\0';
+        buf[strcspn(buf, "\n")] = '\0';
+        if (buf[0] == '\0'){
+            continue;
         } 
-        else {
-            perror("recv");
-            return 1;
-        }
+        pthread_mutex_lock(&lock);
+        printf("client%d: %s\n",client_id, buf); 
+            // добавить функцию отправки сообщений всем клиентам.
+            // для этого : глобальный массив с хранением всех дескрипторов клиентов
+            // функция send_message_to_clients,
+            //  туда передавать id клиента отправившего сообщение и само сообщение
+        send_message_to_clients(client_id, buf);
+        pthread_mutex_unlock(&lock);
+            
+    }
+
+    if (n == 0){
+        printf("client disconnected\n");
+        clients[next_client_id--] = -1;
+        return 0;
+    } 
+    else {
+        perror("recv");
+        return 1;
+    }
 }
 
 void* client_thread(void* arg){
@@ -130,6 +152,7 @@ int find_client_connection_cycle(int* sockfd){
         if (!args) { close(new_fd); continue; }
         args->fd = new_fd;
         args->client_id = next_client_id++;
+        clients[args->client_id] = new_fd;
 
         pthread_t tid;
         int err = pthread_create(&tid, NULL, client_thread, args);
@@ -144,8 +167,6 @@ int find_client_connection_cycle(int* sockfd){
     }
     return 0;
 }
-
-
 
 int server_start(int argc, char* argv[]){
     pthread_mutex_init(&lock, NULL);

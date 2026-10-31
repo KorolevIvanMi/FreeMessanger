@@ -7,9 +7,18 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <sys/wait.h>
+#include <pthread.h>
+#include <stdlib.h>
 
 #include "../include/client.h"
 #include "../../common/include/protocol.h"
+
+pthread_mutex_t lock;
+
+
+typedef struct{
+    int fd;
+} server_args_t;
 
 
 // парсинг входных параметров. Должке быть один
@@ -38,14 +47,41 @@ int resolve_address(const char* IP_adress, struct addrinfo **servinfo ){
     return 0;
 }
 
+int read_server_message(int* sockfd){
+    char buf[MAX_BUF_SIZE];
+    ssize_t n;
+    while ((n = recv(*sockfd, buf, sizeof buf - 1, 0)) > 0) {
+        buf[n] = '\0';
+        buf[strcspn(buf, "\n")] = '\0';
+        if (buf[0] == '\0'){
+            continue;
+        }
+        pthread_mutex_lock(&lock);
+        printf("other_client: %s\n", buf); 
+        pthread_mutex_unlock(&lock);
+    }
+
+    return 0;
+}
+
+void* server_thread(void* arg){
+    server_args_t* args = arg;
+    int fd = args->fd;
+    free(args);
+    read_server_message(&fd);
+    return NULL;
+}
+
 // пытаемся создать соединение с сервером, перебирая все адреса 
 int try_to_connect(struct addrinfo* serfinfo, int* sockfd){
     struct addrinfo *p = NULL; 
+    
     for(p = serfinfo; p != NULL; p = p->ai_next){
-        if((*sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1){
+        if((*sockfd = socket(p->ai_family, p->ai_socktype , p->ai_protocol)) == -1){
             // perror("client: socket");
             continue;
         }
+
         if(connect(*sockfd, p->ai_addr, p->ai_addrlen) == -1){
             close(*sockfd);
             // perror("client: connect");
@@ -57,12 +93,25 @@ int try_to_connect(struct addrinfo* serfinfo, int* sockfd){
         fprintf(stderr, "client: failed to connect \n");
         return -1;
     }
+
+    server_args_t* args = malloc(sizeof *args);
+    args->fd = *sockfd;
+
+    pthread_t tid;
+    int err = pthread_create(&tid, NULL, server_thread, args);
+    if (err != 0) {
+        free(args);
+        return -1;
+    }
+    pthread_detach(tid);
     return 0;
 }
 
 // простой цикл бесконечной отправки сообщений
 int send_cycle(int* sockfd){
     char message_buf[MAX_BUF_SIZE];
+    char server_message[MAX_BUF_SIZE];
+    ssize_t n;
     while(1){
         if(fgets(message_buf, sizeof(message_buf),stdin )== NULL){
             break;
@@ -76,8 +125,10 @@ int send_cycle(int* sockfd){
     return 0;
 }
 
+
 // в argc должен передать IP адресс  
 int client_start(int argc, char* argv[]){
+    pthread_mutex_init(&lock,NULL);
     int sockfd = -1; // файловый дескриптор сокета
     int numbytes = 0; // точное количество байтов, которое пришло или ушло
     char buffer[MAX_BUF_SIZE]; // буффер для складывания полученных значений
