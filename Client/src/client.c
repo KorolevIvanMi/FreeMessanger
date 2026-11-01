@@ -125,7 +125,6 @@ int send_cycle(int* sockfd){
     return 0;
 }
 
-
 // в argc должен передать IP адресс  
 int client_start(int argc, char* argv[]){
     pthread_mutex_init(&lock,NULL);
