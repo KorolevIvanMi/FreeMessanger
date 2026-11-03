@@ -16,7 +16,6 @@
 
 #define BACKLOG 10
 pthread_mutex_t lock;
-static int next_client_id = 0;
 static int clients[10] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
 
 typedef struct{
@@ -39,7 +38,17 @@ int resolve_address(struct addrinfo **servinfo ){
     }
     return 0;
 }
+// находит свободный слот для клиента
+int find_free_client_slot(){
+    for(int i = 0 ; i <= 9; i++){
+        if(clients[i] == -1){
+            return i;
+        }
+    }
+    return -1;
+}
 
+// попытка забиндиться на указанный адрес
 int try_to_bind(struct addrinfo* servinfo, int* sockfd){
     struct addrinfo *p = NULL; 
     int yes = 1;
@@ -68,6 +77,7 @@ int try_to_bind(struct addrinfo* servinfo, int* sockfd){
     return 0;
 }
 
+// получение адреса, как IPv4 так и IPv6
 void* get_in_addr(struct sockaddr *sa){
     if (sa->sa_family == AF_INET){
         return &(((struct sockaddr_in*)sa)->sin_addr);
@@ -91,6 +101,7 @@ void send_message_to_clients(int sender_id, const char buf[MAX_BUF_SIZE]){
     }
 }
 
+// цикл приёма сообщений от пользователя
 int get_client_messages_cycle(int new_fd, int client_id){
     char buf[MAX_BUF_SIZE];
     ssize_t n;
@@ -102,10 +113,6 @@ int get_client_messages_cycle(int new_fd, int client_id){
         } 
         pthread_mutex_lock(&lock);
         printf("client%d: %s\n",client_id, buf); 
-            // добавить функцию отправки сообщений всем клиентам.
-            // для этого : глобальный массив с хранением всех дескрипторов клиентов
-            // функция send_message_to_clients,
-            //  туда передавать id клиента отправившего сообщение и само сообщение
         send_message_to_clients(client_id, buf);
         pthread_mutex_unlock(&lock);
             
@@ -113,7 +120,7 @@ int get_client_messages_cycle(int new_fd, int client_id){
 
     if (n == 0){
         printf("client disconnected\n");
-        clients[next_client_id--] = -1;
+        clients[client_id] = -1;
         return 0;
     } 
     else {
@@ -122,6 +129,7 @@ int get_client_messages_cycle(int new_fd, int client_id){
     }
 }
 
+// поток клиента в которой запускается цикл приёма сообщений 
 void* client_thread(void* arg){
     client_args_t* args = arg;
     int fd = args->fd;
@@ -133,6 +141,7 @@ void* client_thread(void* arg){
     return NULL;
 }
 
+// цикл поиска клиентов и установка соединения с ними
 int find_client_connection_cycle(int* sockfd){
     struct sockaddr_storage their_addr;
     socklen_t sin_size;
@@ -148,12 +157,17 @@ int find_client_connection_cycle(int* sockfd){
         inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr*)&their_addr), s, sizeof s);
         printf("server: got connection from %s\n", s);
 
+        // создание отдельного потока с функцией клиента
         client_args_t* args = malloc(sizeof *args);
         if (!args) { close(new_fd); continue; }
         args->fd = new_fd;
-        args->client_id = next_client_id++;
+        int client_id = find_free_client_slot();
+        args->client_id = client_id;
+        if(client_id == -1){
+            perror("Server overloaded");
+            break;
+        }
         clients[args->client_id] = new_fd;
-
         pthread_t tid;
         int err = pthread_create(&tid, NULL, client_thread, args);
         if (err != 0) {
