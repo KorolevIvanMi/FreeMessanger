@@ -20,15 +20,25 @@ pthread_mutex_t lock;
 WINDOW *win_chat;
 WINDOW *win_input;
 
+const char* client_name = NULL;
+
 typedef struct{
     int fd;
 } server_args_t;
 
 void chat_append(const char* prefix, const char* msg ){
-    pthread_mutex_lock(&lock);
-    wprintw(win_chat, "%s: %s\n", prefix, msg);
-    wrefresh(win_chat);
-    pthread_mutex_unlock(&lock);
+    if(prefix[0] == '\0'){
+        pthread_mutex_lock(&lock);
+        wprintw(win_chat, "%s\n", msg);
+        wrefresh(win_chat);
+        pthread_mutex_unlock(&lock);
+    } else {
+        pthread_mutex_lock(&lock);
+        wprintw(win_chat, "%s: %s\n", prefix, msg);
+        wrefresh(win_chat);
+        pthread_mutex_unlock(&lock);
+    }
+    
 }
 
 static void input_draw(const char* line, int len){
@@ -39,12 +49,13 @@ static void input_draw(const char* line, int len){
 }
 
 // парсинг входных параметров. Должке быть один
-int parse_argv(int argc, char* argv[], const char** out_host){
-    if(argc != 2){
+int parse_argv(int argc, char* argv[], const char** out_host, const char** client_name){
+    if(argc != 3){
         fprintf(stderr, "Bad init argumens");
         return -1;
     }
     *out_host = argv[1];
+    *client_name = argv[2];
     return 0;
 }
 
@@ -66,7 +77,7 @@ int resolve_address(const char* IP_adress, struct addrinfo **servinfo ){
 
 // чтение сообщений от сервера в отдельном потоке 
 int read_server_message(int* sockfd){
-    char buf[MAX_BUF_SIZE];
+    char buf[MAX_BUF_SIZE + 64];
     ssize_t n;
     while ((n = recv(*sockfd, buf, sizeof buf - 1, 0)) > 0) {
         buf[n] = '\0';
@@ -74,7 +85,7 @@ int read_server_message(int* sockfd){
         if (buf[0] == '\0'){
             continue;
         }
-        chat_append("other_client", buf);
+        chat_append("", buf);
     }
 
     return 0;
@@ -129,7 +140,14 @@ int send_cycle(int* sockfd){
     char message_buf[MAX_BUF_SIZE];
     int  n = 0;                       
     message_buf[0] = '\0';
-
+    // первым сообщением отправляем имя пользователя 
+    if (client_name != NULL) {
+        char name_buf[MAX_BUF_SIZE];
+        int name_len = snprintf(name_buf, sizeof name_buf, "%s\n", client_name);
+        if (send(*sockfd, name_buf, name_len, 0) == -1) {
+            return -1;
+        }
+    }
     while(1){
         input_draw(message_buf, n);
         int ch = wgetch(win_input);
@@ -194,7 +212,8 @@ int client_start(int argc, char* argv[]){
 
     // считываем IP адресс в переменную 
     const char* IP_adress = NULL;
-    if(parse_argv(argc, argv, &IP_adress) != 0){
+    
+    if(parse_argv(argc, argv, &IP_adress, &client_name) != 0){
         endwin();
         return 1;
     }

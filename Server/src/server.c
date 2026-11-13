@@ -16,7 +16,8 @@
 
 #define BACKLOG 10
 pthread_mutex_t lock;
-static int clients[10] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
+static int clients[BACKLOG] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
+static char clients_name[BACKLOG][50];
 
 typedef struct{
     int fd;
@@ -87,16 +88,17 @@ void* get_in_addr(struct sockaddr *sa){
 }
 
 void send_message_to_clients(int sender_id, const char buf[MAX_BUF_SIZE]){
-    size_t len = strlen(buf);
-    for(int i = 0 ; i < 10; i ++){
-        if (clients[i] != -1){
-            if (i != sender_id){
-                if(send(clients[i], buf, len, 0) == -1){
-                    perror("send_to_clients");
-                    continue;
-                }
+    char out[MAX_BUF_SIZE + 64];
+    int len = snprintf(out, sizeof out, "%s: %s\n",
+                       clients_name[sender_id], buf);   // ← имя отправителя
+    if (len < 0) return;
+    if ((size_t)len >= sizeof out) len = sizeof out - 1; // обрезали — шлём сколько есть
+
+    for (int i = 0; i < BACKLOG; i++) {
+        if (clients[i] != -1 && i != sender_id) {
+            if (send(clients[i], out, len, 0) == -1) {
+                perror("send_to_clients");
             }
-            
         }
     }
 }
@@ -104,7 +106,17 @@ void send_message_to_clients(int sender_id, const char buf[MAX_BUF_SIZE]){
 // цикл приёма сообщений от пользователя
 int get_client_messages_cycle(int new_fd, int client_id){
     char buf[MAX_BUF_SIZE];
+    char nameBuf[50];
     ssize_t n;
+    if ((n = recv(new_fd, nameBuf, sizeof nameBuf - 1, 0)) > 0) {
+        nameBuf[n] = '\0';
+        nameBuf[strcspn(nameBuf, "\n")] = '\0';  
+        if (nameBuf[0] != '\0' && nameBuf[0] != ' ') {
+            strncpy(clients_name[client_id], nameBuf, sizeof clients_name[client_id] - 1);
+            clients_name[client_id][sizeof clients_name[client_id] - 1] = '\0';
+        }
+    }
+
     while ((n = recv(new_fd, buf, sizeof buf - 1, 0)) > 0) {
         buf[n] = '\0';
         buf[strcspn(buf, "\n")] = '\0';
@@ -112,7 +124,7 @@ int get_client_messages_cycle(int new_fd, int client_id){
             continue;
         } 
         pthread_mutex_lock(&lock);
-        printf("client%d: %s\n",client_id, buf); 
+        printf("%s: %s\n",clients_name[client_id], buf); 
         send_message_to_clients(client_id, buf);
         pthread_mutex_unlock(&lock);
             
@@ -168,6 +180,7 @@ int find_client_connection_cycle(int* sockfd){
             break;
         }
         clients[args->client_id] = new_fd;
+        strcpy(clients_name[args->client_id], "АБОБА");
         pthread_t tid;
         int err = pthread_create(&tid, NULL, client_thread, args);
         if (err != 0) {
